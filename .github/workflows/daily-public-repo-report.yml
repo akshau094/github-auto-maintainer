@@ -1,0 +1,84 @@
+name: Daily Public Repository Report
+
+on:
+  schedule:
+    - cron: "45 15 * * *" # 9:15 PM India time
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-public-repository-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Build public repository report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const owner = "akshau094";
+            const repos = await github.paginate(
+              github.rest.repos.listForUser,
+              { username: owner, type: "public", per_page: 100, sort: "updated" }
+            );
+
+            const publicRepos = repos.filter(repo => !repo.private);
+            const date = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Kolkata",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit"
+            }).format(new Date());
+
+            const rows = publicRepos
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(repo => {
+                const lastPush = repo.pushed_at ? repo.pushed_at.slice(0, 10) : "No recorded push";
+                const description = (repo.description || "").replaceAll("|", "/").replaceAll(String.fromCharCode(10), " ");
+                return "| [" + repo.name + "](" + repo.html_url + ") | " + (repo.default_branch || "Unknown") + " | " + lastPush + " | " + repo.stargazers_count + " | " + description + " |";
+              });
+
+            const report = [
+              "# Daily Public Repository Report",
+              "",
+              "- Scan date: " + date + " (India Standard Time)",
+              "- Public repositories scanned: " + publicRepos.length,
+              "",
+              "This report uses public repository information only. It does not read private repositories or make code changes.",
+              "",
+              "| Repository | Default branch | Last push | Stars | Description |",
+              "|---|---|---|---:|---|",
+              ...(rows.length ? rows : ["| No public repositories found | | | | |"]),
+              "",
+              "_Generated automatically by GitHub Actions._",
+              ""
+            ].join(String.fromCharCode(10));
+
+            fs.mkdirSync("reports", { recursive: true });
+            fs.writeFileSync("reports/public-repo-health.md", report);
+            core.summary
+              .addHeading("Public repository report completed")
+              .addRaw("Scanned " + publicRepos.length + " public repositories.")
+              .write();
+
+      - name: Commit report if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/public-repo-health.md
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: update public repository report"
+          git push
