@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build public repository report
         uses: actions/github-script@v7
